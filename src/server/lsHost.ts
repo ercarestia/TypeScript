@@ -215,10 +215,11 @@ namespace ts.server {
         }
 
         setCompilationSettings(opt: ts.CompilerOptions) {
+            if (changesAffectModuleResolution(this.compilationSettings, opt)) {
+                this.resolvedModuleNames.clear();
+                this.resolvedTypeReferenceDirectives.clear();
+            }
             this.compilationSettings = opt;
-            // conservatively assume that changing compiler options might affect module resolution strategy
-            this.resolvedModuleNames.clear();
-            this.resolvedTypeReferenceDirectives.clear();
         }
     }
 }

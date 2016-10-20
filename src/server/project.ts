@@ -409,7 +409,7 @@ namespace ts.server {
             }
             unresolvedImports = this.lastCachedUnresolvedImportsList;
 
-            const cachedTypings = this.projectService.typingsCache.getTypingsForProject(this, hasChanges);
+            const cachedTypings = this.projectService.typingsCache.getTypingsForProject(this, unresolvedImports, hasChanges);
             if (this.setTypings(cachedTypings)) {
                 hasChanges = this.updateGraphWorker() || hasChanges;
             }
@@ -492,10 +492,13 @@ namespace ts.server {
                     compilerOptions.allowJs = true;
                 }
                 compilerOptions.allowNonTsExtensions = true;
+                if (changesAffectModuleResolution(this.compilerOptions, compilerOptions)) {
+                    // reset cached unresolved imports if changes in compiler options affected module resolution
+                    this.cachedUnresolvedImportsPerFile = createMap<SortedReadonlyArray<string>>();
+                    this.lastCachedUnresolvedImportsList = undefined;
+                }
                 this.compilerOptions = compilerOptions;
                 this.lsHost.setCompilationSettings(compilerOptions);
-
-                // TODO: reset cached unresolved imports per file if compiler options can affect result of module resolution
 
                 this.markAsDirty();
             }

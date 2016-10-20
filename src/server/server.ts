@@ -231,8 +231,8 @@ namespace ts.server {
             this.installer.send({ projectName: p.getProjectName(), kind: "closeProject" });
         }
 
-        enqueueInstallTypingsRequest(project: Project, typingOptions: TypingOptions): void {
-            const request = createInstallTypingsRequest(project, typingOptions);
+        enqueueInstallTypingsRequest(project: Project, typingOptions: TypingOptions, unresolvedImports: SortedReadonlyArray<string>): void {
+            const request = createInstallTypingsRequest(project, typingOptions, unresolvedImports);
             if (this.logger.hasLevel(LogLevel.verbose)) {
                 this.logger.info(`Sending request: ${JSON.stringify(request)}`);
             }

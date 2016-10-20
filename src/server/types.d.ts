@@ -30,8 +30,9 @@ declare namespace ts.server {
     export interface DiscoverTypings extends TypingInstallerRequest {
         readonly fileNames: string[];
         readonly projectRootPath: ts.Path;
-        readonly typingOptions: ts.TypingOptions;
         readonly compilerOptions: ts.CompilerOptions;
+        readonly typingOptions: ts.TypingOptions;
+        readonly unresolvedImports: SortedReadonlyArray<string>;
         readonly cachePath?: string;
         readonly kind: "discover";
     }
@@ -40,20 +41,23 @@ declare namespace ts.server {
         readonly kind: "closeProject";
     }
 
+    export type SetRequest = "set";
+    export type InvalidateRequest = "invalidate";
     export interface TypingInstallerResponse {
         readonly projectName: string;
-        readonly kind: "set" | "invalidate";
+        readonly kind: SetRequest | InvalidateRequest;
     }
 
     export interface SetTypings extends TypingInstallerResponse {
         readonly typingOptions: ts.TypingOptions;
         readonly compilerOptions: ts.CompilerOptions;
         readonly typings: string[];
-        readonly kind: "set";
+        readonly unresolvedImports: SortedReadonlyArray<string>;
+        readonly kind: SetRequest;
     }
 
     export interface InvalidateCachedTypings extends TypingInstallerResponse {
-        readonly kind: "invalidate";
+        readonly kind: InvalidateRequest;
     }
 
     export interface InstallTypingHost extends JsTyping.TypingResolutionHost {

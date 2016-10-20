@@ -45,12 +45,13 @@ namespace ts.server {
         }
     }
 
-    export function createInstallTypingsRequest(project: Project, typingOptions: TypingOptions, cachePath?: string): DiscoverTypings {
+    export function createInstallTypingsRequest(project: Project, typingOptions: TypingOptions, unresolvedImports: SortedReadonlyArray<string>, cachePath?: string): DiscoverTypings {
         return {
             projectName: project.getProjectName(),
             fileNames: project.getFileNames(),
             compilerOptions: project.getCompilerOptions(),
             typingOptions,
+            unresolvedImports,
             projectRootPath: getProjectRootPath(project),
             cachePath,
             kind: "discover"

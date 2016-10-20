@@ -217,9 +217,9 @@ namespace ts.projectSystem {
                 constructor() {
                     super(host);
                 }
-                enqueueInstallTypingsRequest(project: server.Project, typingOptions: TypingOptions) {
+                enqueueInstallTypingsRequest(project: server.Project, typingOptions: TypingOptions, unresolvedImports: server.SortedReadonlyArray<string>) {
                     enqueueIsCalled = true;
-                    super.enqueueInstallTypingsRequest(project, typingOptions);
+                    super.enqueueInstallTypingsRequest(project, typingOptions, unresolvedImports);
                 }
                 executeRequest(requestKind: TI.RequestKind, _requestId: number, _args: string[], _cwd: string, cb: TI.RequestCompletedAction): void {
                     const installedTypings = ["@types/jquery"];
@@ -319,9 +319,9 @@ namespace ts.projectSystem {
                 constructor() {
                     super(host);
                 }
-                enqueueInstallTypingsRequest(project: server.Project, typingOptions: TypingOptions) {
+                enqueueInstallTypingsRequest(project: server.Project, typingOptions: TypingOptions, unresolvedImports: server.SortedReadonlyArray<string>) {
                     enqueueIsCalled = true;
-                    super.enqueueInstallTypingsRequest(project, typingOptions);
+                    super.enqueueInstallTypingsRequest(project, typingOptions, unresolvedImports);
                 }
                 executeRequest(requestKind: TI.RequestKind, _requestId: number, _args: string[], _cwd: string, cb: TI.RequestCompletedAction): void {
                     const installedTypings: string[] = [];

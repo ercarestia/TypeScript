@@ -395,6 +395,7 @@ namespace ts.server.typingsInstaller {
                 typingOptions: request.typingOptions,
                 compilerOptions: request.compilerOptions,
                 typings,
+                unresolvedImports: request.unresolvedImports,
                 kind: "set"
             };
         }
