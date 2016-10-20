@@ -68,6 +68,9 @@ namespace ts.server {
         private lsHost: ServerLanguageServiceHost;
         private program: ts.Program;
 
+        private cachedUnresolvedImportsPerFile = createMap<ReadonlyArray<string>>();
+        private lastCachedUnresolvedImportsList: SortedReadonlyArray<string>;
+
         private languageService: LanguageService;
         builder: Builder;
         /**
@@ -91,7 +94,7 @@ namespace ts.server {
          */
         private projectStateVersion = 0;
 
-        private typingFiles: TypingsArray;
+        private typingFiles: SortedReadonlyArray<string>;
 
         protected projectErrors: Diagnostic[];
 
@@ -326,6 +329,7 @@ namespace ts.server {
         removeFile(info: ScriptInfo, detachFromProject = true) {
             this.removeRootFileIfNecessary(info);
             this.lsHost.notifyFileRemoved(info);
+            delete this.cachedUnresolvedImportsPerFile[info.fileName];
 
             if (detachFromProject) {
                 info.detachFromProject(this);
@@ -338,6 +342,37 @@ namespace ts.server {
             this.projectStateVersion++;
         }
 
+        private extractUnresolvedImportsFromSourceFile(file: SourceFile, result: string[]) {
+            const cached = this.cachedUnresolvedImportsPerFile[file.fileName];
+            if (cached) {
+                // found cached result - use it and return
+                for (const f of cached) {
+                    result.push(f);
+                }
+                return;
+            }
+            let unresolvedImports: string[];
+            if (file.resolvedModules) {
+                for (const name in file.resolvedModules) {
+                    if (!file.resolvedModules[name]) {
+                        // for non-scoped names extract part up-to the first slash
+                        // for scoped names - extract up to the second slash
+                        let trimmed = name.trim();
+                        let i = trimmed.indexOf("/");
+                        if (i !== -1 && trimmed.charCodeAt(0) === CharacterCodes.at) {
+                            i = trimmed.indexOf("/", i);
+                        }
+                        if (i !== -1) {
+                            trimmed = trimmed.substr(0, i);
+                        }
+                        (unresolvedImports || (unresolvedImports = [])).push(trimmed);
+                        result.push(trimmed);
+                    }
+                }
+            }
+            this.cachedUnresolvedImportsPerFile[file.fileName] = unresolvedImports || emptyArray;
+        }
+
         /**
          * Updates set of files that contribute to this project
          * @returns: true if set of files in the project stays the same and false - otherwise.
@@ -346,7 +381,34 @@ namespace ts.server {
             if (!this.languageServiceEnabled) {
                 return true;
             }
+
+            this.lsHost.startRecordingFilesWithChangedResolutions();
+
             let hasChanges = this.updateGraphWorker();
+
+            const changedFiles = this.lsHost.finishRecordingFilesWithChangedResolutions() || emptyArray;
+
+            for (const file of changedFiles) {
+                // delete cached information for changed files
+                delete this.cachedUnresolvedImportsPerFile[file];
+            }
+
+            // 1. no changes in structure, no changes in unresolved imports - do nothing
+            // 2. no changes in structure, unresolved imports were changed - collect unresolved imports for all files 
+            // (can reuse cached imports for files that were not changed)
+            // 3. new files were added/removed, but compilation settings stays the same - collect unresolved imports for all new/modified files
+            // (can reuse cached imports for files that were not changed)
+            // 4. compilation settings were changed in the way that might affect module resolution - drop all caches and collect all data from the scratch
+            let unresolvedImports: SortedReadonlyArray<string>;
+            if (hasChanges || changedFiles.length) {
+                const result: string[] = [];
+                for (const sourceFile of this.program.getSourceFiles()) {
+                    this.extractUnresolvedImportsFromSourceFile(sourceFile, result);
+                }
+                this.lastCachedUnresolvedImportsList = toSortedReadonlyArray(result);
+            }
+            unresolvedImports = this.lastCachedUnresolvedImportsList;
+
             const cachedTypings = this.projectService.typingsCache.getTypingsForProject(this, hasChanges);
             if (this.setTypings(cachedTypings)) {
                 hasChanges = this.updateGraphWorker() || hasChanges;
@@ -357,7 +419,7 @@ namespace ts.server {
             return !hasChanges;
         }
 
-        private setTypings(typings: TypingsArray): boolean {
+        private setTypings(typings: SortedReadonlyArray<string>): boolean {
             if (arrayIsEqualTo(this.typingFiles, typings)) {
                 return false;
             }
@@ -432,6 +494,8 @@ namespace ts.server {
                 compilerOptions.allowNonTsExtensions = true;
                 this.compilerOptions = compilerOptions;
                 this.lsHost.setCompilationSettings(compilerOptions);
+
+                // TODO: reset cached unresolved imports per file if compiler options can affect result of module resolution
 
                 this.markAsDirty();
             }

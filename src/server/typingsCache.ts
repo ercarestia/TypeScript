@@ -18,7 +18,7 @@ namespace ts.server {
     class TypingsCacheEntry {
         readonly typingOptions: TypingOptions;
         readonly compilerOptions: CompilerOptions;
-        readonly typings: TypingsArray;
+        readonly typings: SortedReadonlyArray<string>;
         poisoned: boolean;
     }
 
@@ -61,22 +61,13 @@ namespace ts.server {
         return opt1.allowJs != opt2.allowJs;
     }
 
-    export interface TypingsArray extends ReadonlyArray<string> {
-        " __typingsArrayBrand": any;
-    }
-
-    function toTypingsArray(arr: string[]): TypingsArray {
-        arr.sort();
-        return <any>arr;
-    }
-
     export class TypingsCache {
         private readonly perProjectCache: Map<TypingsCacheEntry> = createMap<TypingsCacheEntry>();
 
         constructor(private readonly installer: ITypingsInstaller) {
         }
 
-        getTypingsForProject(project: Project, forceRefresh: boolean): TypingsArray {
+        getTypingsForProject(project: Project, forceRefresh: boolean): SortedReadonlyArray<string> {
             const typingOptions = project.getTypingOptions();
 
             if (!typingOptions || !typingOptions.enableAutoDiscovery) {
@@ -84,7 +75,7 @@ namespace ts.server {
             }
 
             const entry = this.perProjectCache[project.getProjectName()];
-            const result: TypingsArray = entry ? entry.typings : <any>emptyArray;
+            const result: SortedReadonlyArray<string> = entry ? entry.typings : <any>emptyArray;
             if (forceRefresh || !entry || typingOptionsChanged(typingOptions, entry.typingOptions) || compilerOptionsChanged(project.getCompilerOptions(), entry.compilerOptions)) {
                 // Note: entry is now poisoned since it does not really contain typings for a given combination of compiler options\typings options.
                 // instead it acts as a placeholder to prevent issuing multiple requests
@@ -112,7 +103,7 @@ namespace ts.server {
             this.perProjectCache[projectName] = {
                 compilerOptions,
                 typingOptions,
-                typings: toTypingsArray(newTypings),
+                typings: toSortedReadonlyArray(newTypings),
                 poisoned: false
             };
         }

@@ -9,6 +9,8 @@ namespace ts.server {
         private readonly resolvedTypeReferenceDirectives: ts.FileMap<Map<ResolvedTypeReferenceDirectiveWithFailedLookupLocations>>;
         private readonly getCanonicalFileName: (fileName: string) => string;
 
+        private filesWithChangedSetOfUnresolvedImports: string[];
+
         private readonly resolveModuleName: typeof resolveModuleName;
         readonly trace: (s: string) => void;
 
@@ -52,12 +54,23 @@ namespace ts.server {
             };
         }
 
+        public startRecordingFilesWithChangedResolutions() {
+            this.filesWithChangedSetOfUnresolvedImports = [];
+        }
+
+        public finishRecordingFilesWithChangedResolutions() {
+            const collected = this.filesWithChangedSetOfUnresolvedImports;
+            this.filesWithChangedSetOfUnresolvedImports = undefined;
+            return collected;
+        }
+
         private resolveNamesWithLocalCache<T extends { failedLookupLocations: string[] }, R extends { resolvedFileName?: string }>(
             names: string[],
             containingFile: string,
             cache: ts.FileMap<Map<T>>,
             loader: (name: string, containingFile: string, options: CompilerOptions, host: ModuleResolutionHost) => T,
-            getResult: (s: T) => R): R[] {
+            getResult: (s: T) => R,
+            logChanges: boolean): R[] {
 
             const path = toPath(containingFile, this.host.getCurrentDirectory(), this.getCanonicalFileName);
             const currentResolutionsInFile = cache.get(path);
@@ -78,6 +91,11 @@ namespace ts.server {
                     }
                     else {
                         newResolutions[name] = resolution = loader(name, containingFile, compilerOptions, this);
+                    }
+                    if (resolution !== existingResolution && logChanges && this.filesWithChangedSetOfUnresolvedImports) {
+                        this.filesWithChangedSetOfUnresolvedImports.push(containingFile);
+                        // reset log changes to avoid recording the same file multiple times
+                        logChanges = false;
                     }
                 }
 
@@ -126,11 +144,11 @@ namespace ts.server {
         }
 
         resolveTypeReferenceDirectives(typeDirectiveNames: string[], containingFile: string): ResolvedTypeReferenceDirective[] {
-            return this.resolveNamesWithLocalCache(typeDirectiveNames, containingFile, this.resolvedTypeReferenceDirectives, resolveTypeReferenceDirective, m => m.resolvedTypeReferenceDirective);
+            return this.resolveNamesWithLocalCache(typeDirectiveNames, containingFile, this.resolvedTypeReferenceDirectives, resolveTypeReferenceDirective, m => m.resolvedTypeReferenceDirective, /*logChanges*/ false);
         }
 
         resolveModuleNames(moduleNames: string[], containingFile: string): ResolvedModule[] {
-            return this.resolveNamesWithLocalCache(moduleNames, containingFile, this.resolvedModuleNames, this.resolveModuleName, m => m.resolvedModule);
+            return this.resolveNamesWithLocalCache(moduleNames, containingFile, this.resolvedModuleNames, this.resolveModuleName, m => m.resolvedModule, /*logChanges*/ true);
         }
 
         getDefaultLibFileName() {

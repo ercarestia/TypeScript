@@ -18,6 +18,10 @@ declare namespace ts.server {
         trace?(s: string): void;
     }
 
+    export interface SortedReadonlyArray<T> extends ReadonlyArray<T> {
+        " __sortedReadonlyArrayBrand": any;
+    }
+
     export interface TypingInstallerRequest {
         readonly projectName: string;
         readonly kind: "discover" | "closeProject";

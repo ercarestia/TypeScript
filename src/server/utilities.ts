@@ -209,11 +209,15 @@ namespace ts.server {
     export interface ServerLanguageServiceHost {
         setCompilationSettings(options: CompilerOptions): void;
         notifyFileRemoved(info: ScriptInfo): void;
+        startRecordingFilesWithChangedResolutions(): void;
+        finishRecordingFilesWithChangedResolutions(): string[];
     }
 
     export const nullLanguageServiceHost: ServerLanguageServiceHost = {
         setCompilationSettings: () => undefined,
-        notifyFileRemoved: () => undefined
+        notifyFileRemoved: () => undefined,
+        startRecordingFilesWithChangedResolutions: () => undefined,
+        finishRecordingFilesWithChangedResolutions: () => undefined
     };
 
     export interface ProjectOptions {
@@ -238,6 +242,11 @@ namespace ts.server {
 
     export function makeInferredProjectName(counter: number) {
         return `/dev/null/inferredProject${counter}*`;
+    }
+
+    export function toSortedReadonlyArray(arr: string[]): SortedReadonlyArray<string> {
+        arr.sort();
+        return <any>arr;
     }
 
     export class ThrottledOperations {
