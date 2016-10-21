@@ -777,4 +777,19 @@ namespace ts.projectSystem {
             assert.isTrue(messages.indexOf("Package name '; say ‘Hello from TypeScript!’ #' contains non URI safe characters") > 0, "should find package with invalid name");
         });
     });
+
+    describe("discover typings", () => {
+        it ("should return node for core modules", () => {
+            const f = {
+                path: "/a/b/app.js",
+                content: ""
+            };
+            const host = createServerHost([f]);
+            const cache = createMap<string>();
+            for (const name of JsTyping.nodeCoreModuleList) {
+                const result = JsTyping.discoverTypings(host, [f.path], getDirectoryPath(<Path>f.path), undefined, cache, { enableAutoDiscovery: true }, [name, "somename"]);
+                assert.deepEqual(result.newTypingNames.sort(), ["node", "somename"]);
+            }
+        });
+    });
 }
