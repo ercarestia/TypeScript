@@ -724,7 +724,7 @@ namespace ts.projectSystem {
         it("Malformed package.json should be watched", () => {
             const f = {
                 path: "/a/b/app.js",
-                content: "var x = require('commander')"
+                content: "var x = 1"
             };
             const brokenPackageJson = {
                 path: "/a/b/package.json",
@@ -762,6 +762,47 @@ namespace ts.projectSystem {
 
             service.checkNumberOfProjects({ inferredProjects: 1 });
             checkProjectActualFiles(service.inferredProjects[0], [f.path, commander.path]);
+        });
+
+        it("should install typings for unresolved imports", () => {
+            const file = {
+                path: "/a/b/app.js",
+                content: `
+                import * as fs from "fs";
+                import * as commander from "commander";`
+            };
+            const cachePath = "/a/cache";
+            const node = {
+                path: cachePath + "/node_modules/@types/node/index.d.ts",
+                content: "export let x: number"
+            };
+            const commander = {
+                path: cachePath + "/node_modules/@types/commander/index.d.ts",
+                content: "export let y: string"
+            };
+            const host = createServerHost([file]);
+            const installer = new (class extends Installer {
+                constructor() {
+                    super(host, { globalTypingsCacheLocation: cachePath });
+                }
+                executeRequest(requestKind: TI.RequestKind, _requestId: number, _args: string[], _cwd: string, cb: server.typingsInstaller.RequestCompletedAction) {
+                    const installedTypings = ["@types/node", "@types/commander"];
+                    const typingFiles = [node, commander];
+                    executeCommand(this, host, installedTypings, typingFiles, requestKind, cb);
+                }
+            })();
+            const service = createProjectService(host, { typingsInstaller: installer });
+            service.openClientFile(file.path);
+
+            service.checkNumberOfProjects({ inferredProjects: 1});
+            checkProjectActualFiles(service.inferredProjects[0], [file.path]);
+
+            installer.installAll([TI.NpmViewRequest, TI.NpmViewRequest], [TI.NpmInstallRequest]);
+
+            assert.isTrue(host.fileExists(node.path), "typings for 'node' should be created");
+            assert.isTrue(host.fileExists(commander.path), "typings for 'commander' should be created");
+
+            checkProjectActualFiles(service.inferredProjects[0], [file.path, node.path, commander.path]);
         });
     });
 
@@ -822,7 +863,7 @@ namespace ts.projectSystem {
     });
 
     describe("discover typings", () => {
-        it ("should return node for core modules", () => {
+        it("should return node for core modules", () => {
             const f = {
                 path: "/a/b/app.js",
                 content: ""
@@ -830,9 +871,25 @@ namespace ts.projectSystem {
             const host = createServerHost([f]);
             const cache = createMap<string>();
             for (const name of JsTyping.nodeCoreModuleList) {
-                const result = JsTyping.discoverTypings(host, [f.path], getDirectoryPath(<Path>f.path), undefined, cache, { enableAutoDiscovery: true }, [name, "somename"]);
+                const result = JsTyping.discoverTypings(host, [f.path], getDirectoryPath(<Path>f.path), /*safeListPath*/ undefined, cache, { enableAutoDiscovery: true }, [name, "somename"]);
                 assert.deepEqual(result.newTypingNames.sort(), ["node", "somename"]);
             }
+        });
+
+        it("should use cached locaitons", () => {
+            const f = {
+                path: "/a/b/app.js",
+                content: ""
+            };
+            const node = {
+                path: "/a/b/node.d.ts",
+                content: ""
+            };
+            const host = createServerHost([f, node]);
+            const cache = createMap<string>({ "node": node.path });
+            const result = JsTyping.discoverTypings(host, [f.path], getDirectoryPath(<Path>f.path), /*safeListPath*/ undefined, cache, { enableAutoDiscovery: true }, ["fs", "bar"]);
+            assert.deepEqual(result.cachedTypingPaths, [node.path]);
+            assert.deepEqual(result.newTypingNames, ["bar"]);
         });
     });
 }
