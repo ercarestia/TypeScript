@@ -26,6 +26,7 @@ namespace ts.server.typingsInstaller {
     export enum PackageNameValidationResult {
         Ok,
         ScopedPackagesNotSupported,
+        EmptyName,
         NameTooLong,
         NameStartsWithDot,
         NameStartsWithUnderscore,
@@ -38,7 +39,9 @@ namespace ts.server.typingsInstaller {
      * Validates package name using rules defined at https://docs.npmjs.com/files/package.json
      */
     export function validatePackageName(packageName: string): PackageNameValidationResult {
-        Debug.assert(!!packageName, "Package name is not specified");
+        if (!packageName) {
+            return PackageNameValidationResult.EmptyName;
+        }
         if (packageName.length > MaxPackageNameLength) {
             return PackageNameValidationResult.NameTooLong;
         }
@@ -239,6 +242,9 @@ namespace ts.server.typingsInstaller {
                     this.missingTypingsSet[typing] = true;
                     if (this.log.isEnabled()) {
                         switch (validationResult) {
+                            case PackageNameValidationResult.EmptyName:
+                                this.log.writeLine(`Package name '${typing}' cannot be empty`);
+                                break;
                             case PackageNameValidationResult.NameTooLong:
                                 this.log.writeLine(`Package name '${typing}' should be less than ${MaxPackageNameLength} characters`);
                                 break;
