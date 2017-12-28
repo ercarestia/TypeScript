@@ -1,20 +1,15 @@
 //// [tests/cases/compiler/systemModule3.ts] ////
 
 //// [file1.ts]
-
-
 export default function() {}
 
 //// [file2.ts]
-
 export default function f() {}
 
 //// [file3.ts]
-
 export default class C {}
 
 //// [file4.ts]
-
 export default class {}
 
 //// [file1.js]
@@ -49,7 +44,7 @@ System.register([], function (exports_1, context_1) {
     return {
         setters: [],
         execute: function () {
-            C = (function () {
+            C = /** @class */ (function () {
                 function C() {
                 }
                 return C;
@@ -66,10 +61,10 @@ System.register([], function (exports_1, context_1) {
     return {
         setters: [],
         execute: function () {
-            default_1 = (function () {
-                function class_1() {
+            default_1 = /** @class */ (function () {
+                function default_1() {
                 }
-                return class_1;
+                return default_1;
             }());
             exports_1("default", default_1);
         }

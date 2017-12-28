@@ -1,4 +1,4 @@
-﻿/// <reference path="typingsInstaller.ts"/>
+/// <reference path="typingsInstaller.ts"/>
 /// <reference types="node" />
 
 namespace ts.server.typingsInstaller {
@@ -13,19 +13,26 @@ namespace ts.server.typingsInstaller {
     } = require("path");
 
     class FileLog implements Log {
+        private logEnabled = true;
         constructor(private readonly logFile?: string) {
         }
 
-        isEnabled() {
-            return this.logFile !== undefined;
+        isEnabled = () => {
+            return this.logEnabled && this.logFile !== undefined;
         }
-        writeLine(text: string) {
-            fs.appendFileSync(this.logFile, text + sys.newLine);
+        writeLine = (text: string) => {
+            try {
+                fs.appendFileSync(this.logFile, text + sys.newLine);
+            }
+            catch (e) {
+                this.logEnabled = false;
+            }
         }
     }
 
-    function getNPMLocation(processName: string) {
-        if (path.basename(processName).indexOf("node") == 0) {
+    /** Used if `--npmLocation` is not passed. */
+    function getDefaultNPMLocation(processName: string) {
+        if (path.basename(processName).indexOf("node") === 0) {
             return `"${path.join(path.dirname(process.argv[0]), "npm")}"`;
         }
         else {
@@ -33,56 +40,140 @@ namespace ts.server.typingsInstaller {
         }
     }
 
-    type HttpGet = {
-        (url: string, callback: (response: HttpResponse) => void): NodeJS.EventEmitter;
-    };
-
-    interface HttpResponse extends NodeJS.ReadableStream {
-        statusCode: number;
-        statusMessage: string;
-        destroy(): void;
+    interface TypesRegistryFile {
+        entries: MapLike<void>;
     }
 
-    type Exec = {
-        (command: string, options: { cwd: string }, callback?: (error: Error, stdout: string, stderr: string) => void): any
-    };
+    function loadTypesRegistryFile(typesRegistryFilePath: string, host: InstallTypingHost, log: Log): Map<void> {
+        if (!host.fileExists(typesRegistryFilePath)) {
+            if (log.isEnabled()) {
+                log.writeLine(`Types registry file '${typesRegistryFilePath}' does not exist`);
+            }
+            return createMap<void>();
+        }
+        try {
+            const content = <TypesRegistryFile>JSON.parse(host.readFile(typesRegistryFilePath));
+            return createMapFromTemplate(content.entries);
+        }
+        catch (e) {
+            if (log.isEnabled()) {
+                log.writeLine(`Error when loading types registry file '${typesRegistryFilePath}': ${(<Error>e).message}, ${(<Error>e).stack}`);
+            }
+            return createMap<void>();
+        }
+    }
+
+    const typesRegistryPackageName = "types-registry";
+    function getTypesRegistryFileLocation(globalTypingsCacheLocation: string): string {
+        return combinePaths(normalizeSlashes(globalTypingsCacheLocation), `node_modules/${typesRegistryPackageName}/index.json`);
+    }
+
+    interface ExecSyncOptions {
+        cwd: string;
+        encoding: "utf-8";
+    }
+    type ExecSync = (command: string, options: ExecSyncOptions) => string;
 
     export class NodeTypingsInstaller extends TypingsInstaller {
-        private readonly exec: Exec;
-        private readonly httpGet: HttpGet;
+        private readonly nodeExecSync: ExecSync;
         private readonly npmPath: string;
-        readonly installTypingHost: InstallTypingHost = sys;
+        readonly typesRegistry: Map<void>;
 
-        constructor(globalTypingsCacheLocation: string, throttleLimit: number, log: Log) {
+        private delayedInitializationError: InitializationFailedResponse | undefined;
+
+        constructor(globalTypingsCacheLocation: string, typingSafeListLocation: string, typesMapLocation: string, npmLocation: string | undefined, throttleLimit: number, log: Log) {
             super(
+                sys,
                 globalTypingsCacheLocation,
-                toPath("typingSafeList.json", __dirname, createGetCanonicalFileName(sys.useCaseSensitiveFileNames)),
+                typingSafeListLocation ? toPath(typingSafeListLocation, "", createGetCanonicalFileName(sys.useCaseSensitiveFileNames)) : toPath("typingSafeList.json", __dirname, createGetCanonicalFileName(sys.useCaseSensitiveFileNames)),
+                typesMapLocation ? toPath(typesMapLocation, "", createGetCanonicalFileName(sys.useCaseSensitiveFileNames)) : toPath("typesMap.json", __dirname, createGetCanonicalFileName(sys.useCaseSensitiveFileNames)),
                 throttleLimit,
                 log);
+            this.npmPath = npmLocation !== undefined ? npmLocation : getDefaultNPMLocation(process.argv[0]);
+
+            // If the NPM path contains spaces and isn't wrapped in quotes, do so.
+            if (stringContains(this.npmPath, " ") && this.npmPath[0] !== `"`) {
+                this.npmPath = `"${this.npmPath}"`;
+            }
             if (this.log.isEnabled()) {
                 this.log.writeLine(`Process id: ${process.pid}`);
+                this.log.writeLine(`NPM location: ${this.npmPath} (explicit '${Arguments.NpmLocation}' ${npmLocation === undefined ? "not " : ""} provided)`);
             }
-            this.npmPath = getNPMLocation(process.argv[0]);
-            this.exec = require("child_process").exec;
-            this.httpGet = require("http").get;
+            ({ execSync: this.nodeExecSync } = require("child_process"));
+
+            this.ensurePackageDirectoryExists(globalTypingsCacheLocation);
+
+            try {
+                if (this.log.isEnabled()) {
+                    this.log.writeLine(`Updating ${typesRegistryPackageName} npm package...`);
+                }
+                this.execSyncAndLog(`${this.npmPath} install --ignore-scripts ${typesRegistryPackageName}`, { cwd: globalTypingsCacheLocation });
+                if (this.log.isEnabled()) {
+                    this.log.writeLine(`Updated ${typesRegistryPackageName} npm package`);
+                }
+            }
+            catch (e) {
+                if (this.log.isEnabled()) {
+                    this.log.writeLine(`Error updating ${typesRegistryPackageName} package: ${(<Error>e).message}`);
+                }
+                // store error info to report it later when it is known that server is already listening to events from typings installer
+                this.delayedInitializationError = {
+                    kind: "event::initializationFailed",
+                    message: (<Error>e).message
+                };
+            }
+
+            this.typesRegistry = loadTypesRegistryFile(getTypesRegistryFileLocation(globalTypingsCacheLocation), this.installTypingHost, this.log);
         }
 
-        init() {
-            super.init();
-            process.on("message", (req: DiscoverTypings | CloseProject) => {
+        listen() {
+            process.on("message", (req: TypingInstallerRequestUnion) => {
+                if (this.delayedInitializationError) {
+                    // report initializationFailed error
+                    this.sendResponse(this.delayedInitializationError);
+                    this.delayedInitializationError = undefined;
+                }
                 switch (req.kind) {
                     case "discover":
                         this.install(req);
                         break;
                     case "closeProject":
                         this.closeProject(req);
+                        break;
+                    case "typesRegistry": {
+                        const typesRegistry: { [key: string]: void } = {};
+                        this.typesRegistry.forEach((value, key) => {
+                            typesRegistry[key] = value;
+                        });
+                        const response: TypesRegistryResponse = { kind: EventTypesRegistry, typesRegistry };
+                        this.sendResponse(response);
+                        break;
+                    }
+                    case "installPackage": {
+                        const { fileName, packageName, projectName, projectRootPath } = req;
+                        const cwd = getDirectoryOfPackageJson(fileName, this.installTypingHost) || projectRootPath;
+                        if (cwd) {
+                            this.installWorker(-1, [packageName], cwd, success => {
+                                const message = success ? `Package ${packageName} installed.` : `There was an error installing ${packageName}.`;
+                                const response: PackageInstalledResponse = { kind: ActionPackageInstalled, projectName, success, message };
+                                this.sendResponse(response);
+                            });
+                        }
+                        else {
+                            const response: PackageInstalledResponse = { kind: ActionPackageInstalled, projectName, success: false, message: "Could not determine a project root path." };
+                            this.sendResponse(response);
+                        }
+                        break;
+                    }
+                    default:
+                        Debug.assertNever(req);
                 }
             });
         }
 
-        protected sendResponse(response: SetTypings | InvalidateCachedTypings) {
+        protected sendResponse(response: TypingInstallerResponseUnion) {
             if (this.log.isEnabled()) {
-                this.log.writeLine(`Sending response: ${JSON.stringify(response)}`);
+                this.log.writeLine(`Sending response:\n    ${JSON.stringify(response)}`);
             }
             process.send(response);
             if (this.log.isEnabled()) {
@@ -90,66 +181,53 @@ namespace ts.server.typingsInstaller {
             }
         }
 
-        protected executeRequest(requestKind: RequestKind, requestId: number, args: string[], cwd: string, onRequestCompleted: RequestCompletedAction): void {
+        protected installWorker(requestId: number, packageNames: string[], cwd: string, onRequestCompleted: RequestCompletedAction): void {
             if (this.log.isEnabled()) {
-                this.log.writeLine(`#${requestId} executing ${requestKind}, arguments'${JSON.stringify(args)}'.`);
+                this.log.writeLine(`#${requestId} with arguments'${JSON.stringify(packageNames)}'.`);
             }
-            switch (requestKind) {
-                case NpmViewRequest: {
-                        // const command = `${self.npmPath} view @types/${typing} --silent name`;
-                        // use http request to global npm registry instead of running npm view
-                        Debug.assert(args.length === 1);
-                        const url = `http://registry.npmjs.org/@types%2f${args[0]}`;
-                        const start = Date.now();
-                        this.httpGet(url, response => {
-                            let ok = false;
-                            if (this.log.isEnabled()) {
-                                this.log.writeLine(`${requestKind} #${requestId} request to ${url}:: status code ${response.statusCode}, status message '${response.statusMessage}', took ${Date.now() - start} ms`);
-                            }
-                            switch (response.statusCode) {
-                                case 200: // OK
-                                case 301: // redirect - Moved - treat package as present
-                                case 302: // redirect - Found - treat package as present
-                                    ok = true;
-                                    break;
-                            }
-                            response.destroy();
-                            onRequestCompleted(ok);
-                        }).on("error", (err: Error) => {
-                            if (this.log.isEnabled()) {
-                                this.log.writeLine(`${requestKind} #${requestId} query to npm registry failed with error ${err.message}, stack ${err.stack}`);
-                            }
-                            onRequestCompleted(/*success*/ false);
-                        });
-                    }
-                    break;
-                case NpmInstallRequest: {
-                        const command = `${this.npmPath} install ${args.join(" ")} --save-dev`;
-                        const start = Date.now();
-                        this.exec(command, { cwd }, (_err, stdout, stderr) => {
-                            if (this.log.isEnabled()) {
-                                this.log.writeLine(`${requestKind} #${requestId} took: ${Date.now() - start} ms${sys.newLine}stdout: ${stdout}${sys.newLine}stderr: ${stderr}`);
-                            }
-                            // treat any output on stdout as success
-                            onRequestCompleted(!!stdout);
-                        });
-                    }
-                    break;
-                default:
-                    Debug.assert(false, `Unknown request kind ${requestKind}`);
+            const command = `${this.npmPath} install --ignore-scripts ${packageNames.join(" ")} --save-dev --user-agent="typesInstaller/${version}"`;
+            const start = Date.now();
+            const hasError = this.execSyncAndLog(command, { cwd });
+            if (this.log.isEnabled()) {
+                this.log.writeLine(`npm install #${requestId} took: ${Date.now() - start} ms`);
+            }
+            onRequestCompleted(!hasError);
+        }
+
+        /** Returns 'true' in case of error. */
+        private execSyncAndLog(command: string, options: Pick<ExecSyncOptions, "cwd">): boolean {
+            if (this.log.isEnabled()) {
+                this.log.writeLine(`Exec: ${command}`);
+            }
+            try {
+                const stdout = this.nodeExecSync(command, { ...options, encoding: "utf-8" });
+                if (this.log.isEnabled()) {
+                    this.log.writeLine(`    Succeeded. stdout:${indent(sys.newLine, stdout)}`);
+                }
+                return false;
+            }
+            catch (error) {
+                const { stdout, stderr } = error;
+                this.log.writeLine(`    Failed. stdout:${indent(sys.newLine, stdout)}${sys.newLine}    stderr:${indent(sys.newLine, stderr)}`);
+                return true;
             }
         }
     }
 
-    function findArgument(argumentName: string) {
-        const index = sys.args.indexOf(argumentName);
-        return index >= 0 && index < sys.args.length - 1
-            ? sys.args[index + 1]
-            : undefined;
+    function getDirectoryOfPackageJson(fileName: string, host: InstallTypingHost): string | undefined {
+        return forEachAncestorDirectory(getDirectoryPath(fileName), directory => {
+            if (host.fileExists(combinePaths(directory, "package.json"))) {
+                return directory;
+            }
+        });
     }
 
-    const logFilePath = findArgument("--logFile");
-    const globalTypingsCacheLocation = findArgument("--globalTypingsCacheLocation");
+    const logFilePath = findArgument(server.Arguments.LogFile);
+    const globalTypingsCacheLocation = findArgument(server.Arguments.GlobalCacheLocation);
+    const typingSafeListLocation = findArgument(server.Arguments.TypingSafeListLocation);
+    const typesMapLocation = findArgument(server.Arguments.TypesMapLocation);
+    const npmLocation = findArgument(server.Arguments.NpmLocation);
+
     const log = new FileLog(logFilePath);
     if (log.isEnabled()) {
         process.on("uncaughtException", (e: Error) => {
@@ -162,6 +240,10 @@ namespace ts.server.typingsInstaller {
         }
         process.exit(0);
     });
-    const installer = new NodeTypingsInstaller(globalTypingsCacheLocation, /*throttleLimit*/5, log);
-    installer.init();
+    const installer = new NodeTypingsInstaller(globalTypingsCacheLocation, typingSafeListLocation, typesMapLocation, npmLocation, /*throttleLimit*/5, log);
+    installer.listen();
+
+    function indent(newline: string, str: string): string {
+        return `${newline}    ` + str.replace(/\r?\n/, `${newline}    `);
+    }
 }

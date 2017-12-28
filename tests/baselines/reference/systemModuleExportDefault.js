@@ -1,7 +1,6 @@
 //// [tests/cases/compiler/systemModuleExportDefault.ts] ////
 
 //// [file1.ts]
-
 export default function() {}
 
 //// [file2.ts]
@@ -47,10 +46,10 @@ System.register([], function (exports_1, context_1) {
     return {
         setters: [],
         execute: function () {
-            default_1 = (function () {
-                function class_1() {
+            default_1 = /** @class */ (function () {
+                function default_1() {
                 }
-                return class_1;
+                return default_1;
             }());
             exports_1("default", default_1);
         }
@@ -64,7 +63,7 @@ System.register([], function (exports_1, context_1) {
     return {
         setters: [],
         execute: function () {
-            C = (function () {
+            C = /** @class */ (function () {
                 function C() {
                 }
                 return C;

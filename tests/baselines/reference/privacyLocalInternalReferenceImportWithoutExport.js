@@ -155,20 +155,21 @@ module import_private {
 //// [privacyLocalInternalReferenceImportWithoutExport.js]
 define(["require", "exports"], function (require, exports) {
     "use strict";
+    exports.__esModule = true;
     // private elements
     var m_private;
     (function (m_private) {
-        var c_private = (function () {
+        var c_private = /** @class */ (function () {
             function c_private() {
             }
             return c_private;
         }());
         m_private.c_private = c_private;
+        var e_private;
         (function (e_private) {
             e_private[e_private["Happy"] = 0] = "Happy";
             e_private[e_private["Grumpy"] = 1] = "Grumpy";
-        })(m_private.e_private || (m_private.e_private = {}));
-        var e_private = m_private.e_private;
+        })(e_private = m_private.e_private || (m_private.e_private = {}));
         function f_private() {
             return new c_private();
         }
@@ -176,7 +177,7 @@ define(["require", "exports"], function (require, exports) {
         m_private.v_private = new c_private();
         var mi_private;
         (function (mi_private) {
-            var c = (function () {
+            var c = /** @class */ (function () {
                 function c() {
                 }
                 return c;
@@ -187,17 +188,17 @@ define(["require", "exports"], function (require, exports) {
     // Public elements
     var m_public;
     (function (m_public) {
-        var c_public = (function () {
+        var c_public = /** @class */ (function () {
             function c_public() {
             }
             return c_public;
         }());
         m_public.c_public = c_public;
+        var e_public;
         (function (e_public) {
             e_public[e_public["Happy"] = 0] = "Happy";
             e_public[e_public["Grumpy"] = 1] = "Grumpy";
-        })(m_public.e_public || (m_public.e_public = {}));
-        var e_public = m_public.e_public;
+        })(e_public = m_public.e_public || (m_public.e_public = {}));
         function f_public() {
             return new c_public();
         }
@@ -205,7 +206,7 @@ define(["require", "exports"], function (require, exports) {
         m_public.v_public = 10;
         var mi_public;
         (function (mi_public) {
-            var c = (function () {
+            var c = /** @class */ (function () {
                 function c() {
                 }
                 return c;

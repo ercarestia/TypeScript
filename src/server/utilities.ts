@@ -1,4 +1,5 @@
-﻿/// <reference path="types.d.ts" />
+/// <reference path="types.ts" />
+/// <reference path="shared.ts" />
 
 namespace ts.server {
     export enum LogLevel {
@@ -8,7 +9,7 @@ namespace ts.server {
         verbose
     }
 
-    export const emptyArray: ReadonlyArray<any> = [];
+    export const emptyArray: SortedReadonlyArray<never> = createSortedArray<never>();
 
     export interface Logger {
         close(): void;
@@ -18,18 +19,19 @@ namespace ts.server {
         info(s: string): void;
         startGroup(): void;
         endGroup(): void;
-        msg(s: string, type?: Msg.Types): void;
+        msg(s: string, type?: Msg): void;
         getLogFileName(): string;
     }
 
+    // TODO: Use a const enum (https://github.com/Microsoft/TypeScript/issues/16804)
+    export enum Msg {
+        Err = "Err",
+        Info = "Info",
+        Perf = "Perf",
+    }
     export namespace Msg {
-        export type Err = "Err";
-        export const Err: Err = "Err";
-        export type Info = "Info";
-        export const Info: Info = "Info";
-        export type Perf = "Perf";
-        export const Perf: Perf = "Perf";
-        export type Types = Err | Info | Perf;
+        /** @deprecated Only here for backwards-compatibility. Prefer just `Msg`. */
+        export type Types = Msg;
     }
 
     function getProjectRootPath(project: Project): Path {
@@ -41,16 +43,17 @@ namespace ts.server {
                 return <Path>"";
             case ProjectKind.External:
                 const projectName = normalizeSlashes(project.getProjectName());
-                return project.projectService.host.fileExists(projectName) ? <Path>getDirectoryPath(projectName) : <Path>projectName;
+                return <Path>getDirectoryPath(projectName);
         }
     }
 
-    export function createInstallTypingsRequest(project: Project, typingOptions: TypingOptions, cachePath?: string): DiscoverTypings {
+    export function createInstallTypingsRequest(project: Project, typeAcquisition: TypeAcquisition, unresolvedImports: SortedReadonlyArray<string>, cachePath?: string): DiscoverTypings {
         return {
             projectName: project.getProjectName(),
-            fileNames: project.getFileNames(),
-            compilerOptions: project.getCompilerOptions(),
-            typingOptions,
+            fileNames: project.getFileNames(/*excludeFilesFromExternalLibraries*/ true, /*excludeConfigFiles*/ true).concat(project.getExcludedFiles() as NormalizedPath[]),
+            compilerOptions: project.getCompilationSettings(),
+            typeAcquisition,
+            unresolvedImports,
             projectRootPath: getProjectRootPath(project),
             cachePath,
             kind: "discover"
@@ -75,7 +78,8 @@ namespace ts.server {
             tabSize: 4,
             newLineCharacter: host.newLine || "\n",
             convertTabsToSpaces: true,
-            indentStyle: ts.IndentStyle.Smart,
+            indentStyle: IndentStyle.Smart,
+            insertSpaceAfterConstructor: false,
             insertSpaceAfterCommaDelimiter: true,
             insertSpaceAfterSemicolonInForStatements: true,
             insertSpaceBeforeAndAfterBinaryOperators: true,
@@ -83,36 +87,20 @@ namespace ts.server {
             insertSpaceAfterFunctionKeywordForAnonymousFunctions: false,
             insertSpaceAfterOpeningAndBeforeClosingNonemptyParenthesis: false,
             insertSpaceAfterOpeningAndBeforeClosingNonemptyBrackets: false,
+            insertSpaceAfterOpeningAndBeforeClosingNonemptyBraces: true,
             insertSpaceAfterOpeningAndBeforeClosingTemplateStringBraces: false,
             insertSpaceAfterOpeningAndBeforeClosingJsxExpressionBraces: false,
+            insertSpaceBeforeFunctionParenthesis: false,
             placeOpenBraceOnNewLineForFunctions: false,
             placeOpenBraceOnNewLineForControlBlocks: false,
         };
     }
 
-    export function mergeMaps(target: MapLike<any>, source: MapLike <any>): void {
+    export function mergeMapLikes(target: MapLike<any>, source: MapLike<any>): void {
         for (const key in source) {
             if (hasProperty(source, key)) {
                 target[key] = source[key];
             }
-        }
-    }
-
-    export function removeItemFromSet<T>(items: T[], itemToRemove: T) {
-        if (items.length === 0) {
-            return;
-        }
-        const index = items.indexOf(itemToRemove);
-        if (index < 0) {
-            return;
-        }
-        if (index ===  items.length - 1) {
-            // last item - pop it
-            items.pop();
-        }
-        else {
-            // non-last item - replace it with the last one
-            items[index] = items.pop();
         }
     }
 
@@ -139,95 +127,38 @@ namespace ts.server {
     }
 
     export function createNormalizedPathMap<T>(): NormalizedPathMap<T> {
-/* tslint:disable:no-null-keyword */
-        const map: Map<T> = Object.create(null);
-/* tslint:enable:no-null-keyword */
+        const map = createMap<T>();
         return {
             get(path) {
-                return map[path];
+                return map.get(path);
             },
             set(path, value) {
-                map[path] = value;
+                map.set(path, value);
             },
             contains(path) {
-                return hasProperty(map, path);
+                return map.has(path);
             },
             remove(path) {
-                delete map[path];
+                map.delete(path);
             }
         };
     }
-    function throwLanguageServiceIsDisabledError(): never {
-        throw new Error("LanguageService is disabled");
-    }
-
-    export const nullLanguageService: LanguageService = {
-        cleanupSemanticCache: throwLanguageServiceIsDisabledError,
-        getSyntacticDiagnostics: throwLanguageServiceIsDisabledError,
-        getSemanticDiagnostics: throwLanguageServiceIsDisabledError,
-        getCompilerOptionsDiagnostics: throwLanguageServiceIsDisabledError,
-        getSyntacticClassifications: throwLanguageServiceIsDisabledError,
-        getEncodedSyntacticClassifications: throwLanguageServiceIsDisabledError,
-        getSemanticClassifications: throwLanguageServiceIsDisabledError,
-        getEncodedSemanticClassifications: throwLanguageServiceIsDisabledError,
-        getCompletionsAtPosition:  throwLanguageServiceIsDisabledError,
-        findReferences: throwLanguageServiceIsDisabledError,
-        getCompletionEntryDetails: throwLanguageServiceIsDisabledError,
-        getQuickInfoAtPosition: throwLanguageServiceIsDisabledError,
-        findRenameLocations: throwLanguageServiceIsDisabledError,
-        getNameOrDottedNameSpan: throwLanguageServiceIsDisabledError,
-        getBreakpointStatementAtPosition: throwLanguageServiceIsDisabledError,
-        getBraceMatchingAtPosition: throwLanguageServiceIsDisabledError,
-        getSignatureHelpItems: throwLanguageServiceIsDisabledError,
-        getDefinitionAtPosition: throwLanguageServiceIsDisabledError,
-        getRenameInfo: throwLanguageServiceIsDisabledError,
-        getTypeDefinitionAtPosition: throwLanguageServiceIsDisabledError,
-        getReferencesAtPosition: throwLanguageServiceIsDisabledError,
-        getDocumentHighlights: throwLanguageServiceIsDisabledError,
-        getOccurrencesAtPosition: throwLanguageServiceIsDisabledError,
-        getNavigateToItems: throwLanguageServiceIsDisabledError,
-        getNavigationBarItems: throwLanguageServiceIsDisabledError,
-        getNavigationTree: throwLanguageServiceIsDisabledError,
-        getOutliningSpans: throwLanguageServiceIsDisabledError,
-        getTodoComments: throwLanguageServiceIsDisabledError,
-        getIndentationAtPosition: throwLanguageServiceIsDisabledError,
-        getFormattingEditsForRange: throwLanguageServiceIsDisabledError,
-        getFormattingEditsForDocument: throwLanguageServiceIsDisabledError,
-        getFormattingEditsAfterKeystroke: throwLanguageServiceIsDisabledError,
-        getDocCommentTemplateAtPosition: throwLanguageServiceIsDisabledError,
-        isValidBraceCompletionAtPosition: throwLanguageServiceIsDisabledError,
-        getEmitOutput: throwLanguageServiceIsDisabledError,
-        getProgram: throwLanguageServiceIsDisabledError,
-        getNonBoundSourceFile: throwLanguageServiceIsDisabledError,
-        dispose: throwLanguageServiceIsDisabledError,
-        getCompletionEntrySymbol: throwLanguageServiceIsDisabledError,
-        getImplementationAtPosition: throwLanguageServiceIsDisabledError,
-        getSourceFile: throwLanguageServiceIsDisabledError,
-        getCodeFixesAtPosition: throwLanguageServiceIsDisabledError
-    };
-
-    export interface ServerLanguageServiceHost {
-        setCompilationSettings(options: CompilerOptions): void;
-        notifyFileRemoved(info: ScriptInfo): void;
-    }
-
-    export const nullLanguageServiceHost: ServerLanguageServiceHost = {
-        setCompilationSettings: () => undefined,
-        notifyFileRemoved: () => undefined
-    };
 
     export interface ProjectOptions {
+        configHasExtendsProperty: boolean;
         /**
          * true if config file explicitly listed files
-         **/
-        configHasFilesProperty?: boolean;
+         */
+        configHasFilesProperty: boolean;
+        configHasIncludeProperty: boolean;
+        configHasExcludeProperty: boolean;
         /**
          * these fields can be present in the project file
-         **/
+         */
         files?: string[];
         wildcardDirectories?: Map<WatchDirectoryFlags>;
         compilerOptions?: CompilerOptions;
-        typingOptions?: TypingOptions;
+        typeAcquisition?: TypeAcquisition;
         compileOnSave?: boolean;
     }
 
@@ -240,22 +171,44 @@ namespace ts.server {
         return `/dev/null/inferredProject${counter}*`;
     }
 
+    export function createSortedArray<T>(): SortedArray<T> {
+        return [] as SortedArray<T>;
+    }
+}
+
+/* @internal */
+namespace ts.server {
     export class ThrottledOperations {
-        private pendingTimeouts: Map<any> = createMap<any>();
-        constructor(private readonly host: ServerHost) {
+        private readonly pendingTimeouts: Map<any> = createMap<any>();
+        private readonly logger?: Logger | undefined;
+        constructor(private readonly host: ServerHost, logger: Logger) {
+            this.logger = logger.hasLevel(LogLevel.verbose) && logger;
         }
 
+        /**
+         * Wait `number` milliseconds and then invoke `cb`.  If, while waiting, schedule
+         * is called again with the same `operationId`, cancel this operation in favor
+         * of the new one.  (Note that the amount of time the canceled operation had been
+         * waiting does not affect the amount of time that the new operation waits.)
+         */
         public schedule(operationId: string, delay: number, cb: () => void) {
-            if (hasProperty(this.pendingTimeouts, operationId)) {
+            const pendingTimeout = this.pendingTimeouts.get(operationId);
+            if (pendingTimeout) {
                 // another operation was already scheduled for this id - cancel it
-                this.host.clearTimeout(this.pendingTimeouts[operationId]);
+                this.host.clearTimeout(pendingTimeout);
             }
             // schedule new operation, pass arguments
-            this.pendingTimeouts[operationId] = this.host.setTimeout(ThrottledOperations.run, delay, this, operationId, cb);
+            this.pendingTimeouts.set(operationId, this.host.setTimeout(ThrottledOperations.run, delay, this, operationId, cb));
+            if (this.logger) {
+                this.logger.info(`Scheduled: ${operationId}${pendingTimeout ? ", Cancelled earlier one" : ""}`);
+            }
         }
 
         private static run(self: ThrottledOperations, operationId: string, cb: () => void) {
-            delete self.pendingTimeouts[operationId];
+            self.pendingTimeouts.delete(operationId);
+            if (self.logger) {
+                self.logger.info(`Running: ${operationId}`);
+            }
             cb();
         }
     }
@@ -266,7 +219,7 @@ namespace ts.server {
         }
 
         public scheduleCollect() {
-            if (!this.host.gc || this.timerId != undefined) {
+            if (!this.host.gc || this.timerId !== undefined) {
                 // no global.gc or collection was already scheduled - skip this request
                 return;
             }
@@ -285,5 +238,95 @@ namespace ts.server {
                 self.logger.perftrc(`GC::before ${before}, after ${after}`);
             }
         }
+    }
+
+    export function getBaseConfigFileName(configFilePath: NormalizedPath): "tsconfig.json" | "jsconfig.json" | undefined {
+        const base = getBaseFileName(configFilePath);
+        return base === "tsconfig.json" || base === "jsconfig.json" ? base : undefined;
+    }
+
+    export function insertSorted<T>(array: SortedArray<T>, insert: T, compare: Comparer<T>): void {
+        if (array.length === 0) {
+            array.push(insert);
+            return;
+        }
+
+        const insertIndex = binarySearch(array, insert, identity, compare);
+        if (insertIndex < 0) {
+            array.splice(~insertIndex, 0, insert);
+        }
+    }
+
+    export function removeSorted<T>(array: SortedArray<T>, remove: T, compare: Comparer<T>): void {
+        if (!array || array.length === 0) {
+            return;
+        }
+
+        if (array[0] === remove) {
+            array.splice(0, 1);
+            return;
+        }
+
+        const removeIndex = binarySearch(array, remove, identity, compare);
+        if (removeIndex >= 0) {
+            array.splice(removeIndex, 1);
+        }
+    }
+
+    export function toSortedArray(arr: string[]): SortedArray<string>;
+    export function toSortedArray<T>(arr: T[], comparer: Comparer<T>): SortedArray<T>;
+    export function toSortedArray<T>(arr: T[], comparer?: Comparer<T>): SortedArray<T> {
+        arr.sort(comparer);
+        return arr as SortedArray<T>;
+    }
+
+    export function toDeduplicatedSortedArray(arr: string[]): SortedArray<string> {
+        arr.sort();
+        filterMutate(arr, isNonDuplicateInSortedArray);
+        return arr as SortedArray<string>;
+    }
+    function isNonDuplicateInSortedArray<T>(value: T, index: number, array: T[]) {
+        return index === 0 || value !== array[index - 1];
+    }
+
+    export function enumerateInsertsAndDeletes<T>(newItems: SortedReadonlyArray<T>, oldItems: SortedReadonlyArray<T>, inserted: (newItem: T) => void, deleted: (oldItem: T) => void, comparer: Comparer<T>) {
+        let newIndex = 0;
+        let oldIndex = 0;
+        const newLen = newItems.length;
+        const oldLen = oldItems.length;
+        while (newIndex < newLen && oldIndex < oldLen) {
+            const newItem = newItems[newIndex];
+            const oldItem = oldItems[oldIndex];
+            const compareResult = comparer(newItem, oldItem);
+            if (compareResult === Comparison.LessThan) {
+                inserted(newItem);
+                newIndex++;
+            }
+            else if (compareResult === Comparison.GreaterThan) {
+                deleted(oldItem);
+                oldIndex++;
+            }
+            else {
+                newIndex++;
+                oldIndex++;
+            }
+        }
+        while (newIndex < newLen) {
+            inserted(newItems[newIndex++]);
+        }
+        while (oldIndex < oldLen) {
+            deleted(oldItems[oldIndex++]);
+        }
+    }
+
+    /* @internal */
+    export function indent(str: string): string {
+        return "\n    " + str;
+    }
+
+    /** Put stringified JSON on the next line, indented. */
+    /* @internal */
+    export function stringifyIndented(json: {}): string {
+        return "\n    " + JSON.stringify(json);
     }
 }

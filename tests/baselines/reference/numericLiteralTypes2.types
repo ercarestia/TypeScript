@@ -1,5 +1,4 @@
 === tests/cases/conformance/types/literal/numericLiteralTypes2.ts ===
-
 type A1 = 1;
 >A1 : 1
 
@@ -203,11 +202,11 @@ function f4(a: 1, b: 0 | 1 | 2) {
 
     a++;
 >a++ : number
->a : 1
+>a : number
 
     b++;
 >b++ : number
->b : 0 | 1 | 2
+>b : number
 }
 
 declare function g(x: 0): string;
